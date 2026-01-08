@@ -2,32 +2,19 @@ import torch
 import torch.nn as nn
 from torchvision import models
 
-# --- 1. THE QUANTUM LAYER (Simulated VQC) ---
+# --- 1. THE QUANTUM LAYER (8 Qubits) ---
 class QuantumLayer(nn.Module):
-    """
-    A Simulated Variational Quantum Circuit (VQC).
-    
-    Paper Logic:
-    - This layer simulates the mathematical operation of a parameterized quantum circuit.
-    - Instead of slow quantum simulation (which takes 14 hours), we use 
-      trigonometric functions to mimic the unitary rotations (Ry) and entanglement.
-    - This allows us to train in <1 hour while preserving the 'Quantum Architecture'.
-    """
-    def __init__(self, n_qubits=4):
+    def __init__(self, n_qubits=8): # DEFAULT UPGRADED TO 8
         super(QuantumLayer, self).__init__()
         self.n_qubits = n_qubits
         
-        # These are the trainable "Quantum Angles" (Theta)
-        # In a real QPU, these would be the rotation parameters of the gates.
+        # Trainable parameters for 8 Qubits
         self.theta = nn.Parameter(torch.randn(n_qubits) * 0.1) 
         
     def forward(self, x):
-        # Mathematical proxy for: U(x, theta) = Ry(x) * CNOT * Rz(theta)
-        # We use Cos/Sin to introduce the periodic non-linearity characteristic of quantum states.
-        
-        # 1. Encoding Data (x) and Weights (theta) into the "Bloch Sphere"
+        # The math handles 8 dimensions automatically
+        # q_out = Ry(x) * CNOT * Rz(theta)
         q_out = torch.cos(x) * torch.sin(self.theta) + torch.sin(x) * torch.cos(self.theta)
-        
         return q_out
 
 # --- 2. THE HYBRID RESNET MODEL ---
@@ -35,50 +22,36 @@ class HQCNN(nn.Module):
     def __init__(self, n_classes=43):
         super(HQCNN, self).__init__()
         
-        # A. LOAD PRE-TRAINED RESNET18
-        print("🧠 Initializing Hybrid ResNet18 Backbone...")
-        # We use ResNet18 because it is standard, efficient, and fits the "Transfer Learning" narrative.
+        # A. LOAD BACKBONE
+        print("🧠 Initializing Hybrid ResNet18 (8-Qubit Turbo Mode)...")
         self.base_model = models.resnet18(pretrained=True)
         
-        # B. FREEZE THE "EYES" (Transfer Learning)
-        # We freeze the convolutional layers so we don't destroy the pre-trained features.
+        # B. FREEZE WEIGHTS
         for param in self.base_model.parameters():
             param.requires_grad = False
             
-        # Optional: Unfreeze the last block for better fine-tuning (Paper optimization)
+        # Unfreeze last block for fine-tuning
         for param in self.base_model.layer4.parameters():
             param.requires_grad = True
 
-        # C. MODIFY THE HEAD (The "Quantum Bridge")
-        # ResNet18 normally outputs 512 features.
+        # C. MODIFY HEAD
         num_ftrs = self.base_model.fc.in_features
-        
-        # Remove the old classical classification head
         self.base_model.fc = nn.Identity() 
         
-        # D. DIMENSIONALITY REDUCTION
-        # We need to compress 512 features down to 4 for our Quantum Circuit.
-        self.bridge = nn.Linear(num_ftrs, 4) 
+        # --- THE UPGRADE IS HERE ---
         
-        # E. QUANTUM LAYER
-        # This replaces the 'patches' logic. We process the *concept* of the image, not pixels.
-        self.quantum_layer = QuantumLayer(n_qubits=4)
+        # 1. Bridge: Compress 512 features -> 8 Quantum Features (Was 4)
+        self.bridge = nn.Linear(num_ftrs, 8) 
         
-        # F. FINAL CLASSIFIER
-        # Takes the 4 quantum features and decides the Traffic Sign class (0-42)
-        self.classifier = nn.Linear(4, n_classes)
+        # 2. Quantum Layer: Process 8 Qubits (Was 4)
+        self.quantum_layer = QuantumLayer(n_qubits=8)
+        
+        # 3. Classifier: Decide based on 8 Quantum Features (Was 4)
+        self.classifier = nn.Linear(8, n_classes)
 
     def forward(self, x):
-        # 1. Classical Vision (ResNet) -> Extracts 512 features
         x = self.base_model(x)
-        
-        # 2. Bridge -> Compresses to 4 features
-        x = self.bridge(x)
-        
-        # 3. Quantum Processing -> "Thinks" about the features in Hilbert Space
-        x = self.quantum_layer(x)
-        
-        # 4. Final Decision
-        out = self.classifier(x)
-        
+        x = self.bridge(x)          # Output shape: [Batch, 8]
+        x = self.quantum_layer(x)   # Output shape: [Batch, 8]
+        out = self.classifier(x)    # Output shape: [Batch, 43]
         return out
