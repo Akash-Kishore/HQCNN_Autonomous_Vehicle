@@ -1,10 +1,12 @@
 import os
 import pandas as pd
 import torch
-from torch.utils.data import Dataset, DataLoader
-from cv2 import imread, cvtColor, COLOR_BGR2RGB
-from src.transforms import get_train_transforms, get_val_transforms
+from torch.utils.data import Dataset, DataLoader, Subset
+from PIL import Image
+from torchvision import transforms
+import numpy as np
 
+# --- 1. DATASET CLASS ---
 class GTSRBDataset(Dataset):
     def __init__(self, root_dir, csv_file, transform=None):
         self.root_dir = root_dir
@@ -15,23 +17,17 @@ class GTSRBDataset(Dataset):
         return len(self.df)
 
     def __getitem__(self, idx):
-        # Read file path from CSV (e.g., 'Train/0/00005_00029.png')
+        # Read path from CSV
         img_rel_path = self.df.iloc[idx]['Path']
-        
-        # Construct full path
         img_path = os.path.join(self.root_dir, img_rel_path)
         
-        # Read image
-        image = imread(img_path)
-        
-        # Error handling
-        if image is None:
-            raise FileNotFoundError(f"Failed to load image at {img_path}")
+        # Open as PIL RGB (Critical for ResNet)
+        try:
+            image = Image.open(img_path).convert('RGB')
+        except (OSError, FileNotFoundError):
+            # Fallback for corrupt images
+            return self.__getitem__((idx + 1) % len(self.df))
 
-        # Convert BGR to RGB
-        image = cvtColor(image, COLOR_BGR2RGB)
-        
-        # Get label
         label = int(self.df.iloc[idx]['ClassId'])
 
         if self.transform:
@@ -39,32 +35,72 @@ class GTSRBDataset(Dataset):
 
         return image, label
 
-def get_data_loaders(data_dir, batch_size=50):
+# --- 2. LOADER FUNCTION (Scientifically Rigorous) ---
+def get_data_loaders(data_dir, batch_size=32, percent=1.0):
     """
-    Creates Training and Validation DataLoaders.
+    Args:
+        percent (float): Set to 0.20 for the Paper Experiment (20% data).
     """
     train_csv = os.path.join(data_dir, 'Train.csv')
     
-    if not os.path.exists(train_csv):
-        raise FileNotFoundError(f"Could not find Train.csv at {train_csv}")
+    # --- A. DEFINE TRANSFORMS ---
+    # ResNet18 REQUIRES specific Normalization stats
+    mean = [0.485, 0.456, 0.406]
+    std = [0.229, 0.224, 0.225]
 
-    # Initialize Dataset
-    full_dataset = GTSRBDataset(
-        root_dir=data_dir, 
-        csv_file=train_csv, 
-        transform=get_train_transforms()
-    )
+    # Training: Add Noise/Rotation (Robustness)
+    train_transform = transforms.Compose([
+        transforms.Resize((224, 224)),       # ResNet Input Size
+        transforms.RandomRotation(15),       # Paper Novelty
+        transforms.ColorJitter(brightness=0.2, contrast=0.2), 
+        transforms.ToTensor(),
+        transforms.Normalize(mean, std)
+    ])
 
-    # Split: 85% Train, 15% Validation
-    train_size = int(0.85 * len(full_dataset))
-    val_size = len(full_dataset) - train_size
-    train_dataset, val_dataset = torch.utils.data.random_split(full_dataset, [train_size, val_size])
+    # Validation: Clean (No Rotation)
+    val_transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean, std)
+    ])
 
-    # Override validation transform
-    val_dataset.dataset.transform = get_val_transforms()
+    # --- B. LOAD INDICES ---
+    # We load the CSV once just to get the length and indices
+    df = pd.read_csv(train_csv)
+    n_samples = len(df)
+    indices = list(range(n_samples))
 
-    # Create Loaders (Num workers=0 is safest for WSL)
+    # --- C. EFFICIENCY SLICING (The Paper Logic) ---
+    if percent < 1.0:
+        # We reduce the TOTAL dataset to 20% before splitting
+        n_samples = int(n_samples * percent)
+        np.random.seed(42) # Reproducible Science
+        np.random.shuffle(indices)
+        indices = indices[:n_samples]
+        print(f"✂️ SLICING DATA: Reduced dataset to {n_samples} images ({percent*100}%)")
+
+    # --- D. SPLIT TRAIN/VAL INDICES ---
+    # 85% Train, 15% Val
+    np.random.seed(42)
+    np.random.shuffle(indices)
+    split = int(0.85 * len(indices))
+    train_idx = indices[:split]
+    val_idx = indices[split:]
+
+    # --- E. CREATE DATASETS ---
+    # CRITICAL FIX: We create TWO dataset objects.
+    # One with train_transform, one with val_transform.
+    # We then use Subset to assign the indices.
+    
+    train_set_full = GTSRBDataset(data_dir, train_csv, transform=train_transform)
+    val_set_full = GTSRBDataset(data_dir, train_csv, transform=val_transform)
+
+    train_dataset = Subset(train_set_full, train_idx)
+    val_dataset = Subset(val_set_full, val_idx)
+
+    # --- F. LOADERS ---
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
 
+    print(f"✅ DATA READY: {len(train_dataset)} Train | {len(val_dataset)} Val")
     return train_loader, val_loader
