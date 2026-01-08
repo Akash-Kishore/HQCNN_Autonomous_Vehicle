@@ -13,9 +13,12 @@ class PaperGrayscale(object):
         # Convert PIL image to numpy array (RGB)
         img_np = np.array(img, dtype=np.float32)
         
-        # Apply formula
-        r, g, b = img_np[:,:,0], img_np[:,:,1], img_np[:,:,2]
-        gray = 0.2989 * r + 0.5870 * g + 0.1140 * b
+        # Check if image has 3 channels, otherwise it's already gray
+        if len(img_np.shape) == 3:
+            r, g, b = img_np[:,:,0], img_np[:,:,1], img_np[:,:,2]
+            gray = 0.2989 * r + 0.5870 * g + 0.1140 * b
+        else:
+            gray = img_np
         
         # Convert back to uint8 for histogram equalization compatibility
         gray = gray.astype(np.uint8)
