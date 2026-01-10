@@ -46,34 +46,34 @@ class GTSRBDataset(Dataset):
 
         return image, label
 
-# --- 3. CTSD DATASET (EXCEL-BASED + FLAT FOLDER) ---
-# UPDATED for your screenshot structure
+# --- 3. CTSD DATASET (CSV-BASED + FLAT FOLDER) ---
+# UPDATED: Now reads from CSV instead of Excel
 class CTSDDataset(Dataset):
     def __init__(self, root_dir, annotation_file, transform=None, mapping=None):
         """
         root_dir: Path to the 'images' folder
-        annotation_file: Path to 'annotations.xlsx'
+        annotation_file: Path to 'annotations.csv'
         mapping: Dict mapping CTSD Class ID -> GTSB Class ID
         """
         self.root_dir = root_dir
         self.transform = transform
         self.mapping = mapping
         
-        # Load Excel
-        # NOTE: Adjust 'usecols' or column names if your Excel header is different
-        # I am assuming columns are roughly [FileName, ClassId]
-        raw_df = pd.read_excel(annotation_file)
+        # Load CSV
+        # NOTE: Verify your CSV headers. 
+        # I am assuming columns are roughly [FileName, ... , ClassId]
+        self.raw_df = pd.read_csv(annotation_file)
         
         self.samples = []
-        print(f"🔍 CTSD Loader: Scanning {len(raw_df)} rows in Excel...")
+        print(f"🔍 CTSD Loader: Scanning {len(self.raw_df)} rows in CSV...")
 
         # Filter and Map
-        # We iterate through the Excel file and only keep classes we can map to GTSRB
-        for idx, row in raw_df.iterrows():
-            # Adjust these keys based on your actual Excel headers!
-            # Common names: 'Path', 'Filename', 'Name' / 'ClassId', 'label', 'Roi.ClassId'
-            filename = str(row.iloc[0]) # Assuming filename is 1st column
-            class_id = int(row.iloc[-1]) # Assuming class ID is last column
+        # We iterate through the CSV and only keep classes we can map to GTSRB
+        for idx, row in self.raw_df.iterrows():
+            # Adjust these indices based on your actual CSV column order!
+            # row.iloc[0] = Filename, row.iloc[-1] = ClassId
+            filename = str(row.iloc[0]) 
+            class_id = int(row.iloc[-1]) 
             
             if self.mapping and class_id in self.mapping:
                 gtsb_id = self.mapping[class_id]
@@ -114,6 +114,7 @@ def get_robust_loaders(data_dir, batch_size=32, noise_level=0.1):
         transforms.RandomRotation(15),
         transforms.ColorJitter(brightness=0.2, contrast=0.2), 
         transforms.ToTensor(),
+        # Add Noise only to training data
         AddGaussianNoise(mean=0.0, std=noise_level, p=0.3), 
         transforms.Normalize(mean, std)
     ])
@@ -148,11 +149,10 @@ def get_robust_loaders(data_dir, batch_size=32, noise_level=0.1):
 
 def get_ctsd_loader(ctsd_root, mapping, batch_size=32):
     """ Loads CTSD for Testing """
-    # Based on your screenshot:
     # Images are in: .../CTSD/images
-    # Excel is in: .../CTSD/annotations.xlsx
+    # CSV is in: .../CTSD/annotations.csv
     img_dir = os.path.join(ctsd_root, 'images')
-    xlsx_file = os.path.join(ctsd_root, 'annotations.xlsx')
+    csv_file = os.path.join(ctsd_root, 'annotations.csv')
     
     mean = [0.485, 0.456, 0.406]
     std = [0.229, 0.224, 0.225]
@@ -163,5 +163,5 @@ def get_ctsd_loader(ctsd_root, mapping, batch_size=32):
         transforms.Normalize(mean, std)
     ])
     
-    dataset = CTSDDataset(img_dir, xlsx_file, transform=test_transform, mapping=mapping)
+    dataset = CTSDDataset(img_dir, csv_file, transform=test_transform, mapping=mapping)
     return DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0)
