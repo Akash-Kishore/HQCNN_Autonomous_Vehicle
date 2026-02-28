@@ -1,0 +1,40 @@
+// HQCNN Architecture
+digraph {
+	rankdir=TB ratio=fill size="10,12"
+	node [fontname=Helvetica fontsize=12 shape=box style=filled]
+	Input [label="Input Image
+(3 x 224 x 224)" fillcolor="#E0E0E0" shape=ellipse]
+	subgraph cluster_classical {
+		color=blue fontcolor=blue label="Classical Backbone (ResNet-18)" style=dashed
+		ResNet [label="ResNet-18 Feature Extractor
+(Frozen Layers 1-3, Unfrozen Layer 4)" fillcolor="#BBDEFB"]
+		Flatten [label="Global Average Pooling
+(512 Features)" fillcolor="#90CAF9"]
+	}
+	Bridge [label="Bridge Layer (Linear)
+Input: 512 -> Output: 8" fillcolor="#FFF59D" shape=parallelogram]
+	subgraph cluster_quantum {
+		color=red fontcolor=red label="Variational Quantum Layer (8 Parallel Qubits)" style=dashed
+		Encode [label="State Preparation
+Ry(x) Rotation" fillcolor="#FFCDD2"]
+		Var [label="Variational Weights
+Ry(theta) Rotation" fillcolor="#EF9A9A"]
+		Measure [label="X-Basis Measurement
+Exp. Value = sin(x + theta)" fillcolor="#E57373"]
+	}
+	Classifier [label="Classifier (Linear)
+Input: 8 -> Output: 43" fillcolor="#C8E6C9"]
+	Softmax [label="Softmax Activation
+Probability Distribution" fillcolor="#A5D6A7"]
+	Output [label="Final Prediction
+(Traffic Sign Class)" fillcolor="#81C784" shape=ellipse]
+	Input -> ResNet
+	ResNet -> Flatten
+	Flatten -> Bridge [label="Feature Vector (512)"]
+	Bridge -> Encode [label="Latent Vector (8)"]
+	Encode -> Var [label="Quantum State |ψ1>"]
+	Var -> Measure [label="Quantum State |ψ2>"]
+	Measure -> Classifier [label="Activation Vector (8)"]
+	Classifier -> Softmax
+	Softmax -> Output
+}
